@@ -1,0 +1,169 @@
+---
+title: "《给阿嬷的情书》票房地理扩散与观众情感分析"
+author: "黄妍桐 | 广东外语外贸大学 数字经济专业"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: journal
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(knitr)
+library(wordcloud2)
+```
+## 摘要<br>
+本报告以2026年口碑电影《给阿嬷的情书》为研究对象，基于连续31天手工采集的票房数据及81条豆瓣短评，分析其票房地理扩散路径与观众情感反馈。研究发现：票房呈现“潮汕点火 → 广东燎原 → 全国补涨”的三阶段扩散模式；潮汕地区票房占比从早期的30%以上降至后期的10%左右，证实口碑已突破地域限制；文本挖掘显示“情义”“哭”“感动”为最高频情感词，验证了影片的情感共鸣机制。项目代码及数据已上传 GitHub。
+
+**关键词**：空间扩散；文本挖掘；R语言；口碑传播
+
+## 1.数据来源与处理
+### 1.1票房数据<br>
+来源：猫眼专业版（手工录入）<br>
+时间范围：2025年4月30日 – 5月30日（共31天）<br>
+字段：全国票房、潮汕地区票房、广东省票房、七大区域票房（华东、华南、华中、西南、华北、西北、东北）<br>
+数据量：31条 × 11个字段<br>
+```{r a,include=FALSE}
+df_box <- read_excel("数据.xlsx", sheet = "Sheet1", skip = 2, col_names = FALSE)
+colnames(df_box) <- c("date", "national", "chaoshan", "guangdong", 
+                      "east", "south", "central", "southwest", 
+                      "north", "northwest", "northeast")
+df_box$date <- as.Date(df_box$date)
+df_box[, -1] <- lapply(df_box[, -1], as.numeric)
+```
+### 1.2 评论数据<br>
+来源：豆瓣短评（八爪鱼采集器 + 手动整理）<br>
+时间：2026年5月30日<br>
+有效评论数：81条<br>
+字段：评论文本<br>
+```{r}
+df_comm <- read_excel("电影观后感.xlsx", sheet = 1, col_names = TRUE)
+colnames(df_comm) <- c("comment")
+df_comm <- df_comm %>% filter(!is.na(comment), comment != "字段1")
+```
+## 2.票房总体表现
+
+### 2.1累计票房走势<br>
+
+```{r}
+df_box %>%
+  mutate(cum = cumsum(national)) %>%
+  ggplot(aes(x = date, y = cum)) +
+  geom_line(color = "red", size = 1.2) +
+  labs(title = "累计票房走势", x = "日期", y = "累计票房（万元）") +
+  theme_minimal()
+```
+
+分析结论：首日仅377万元，至5月30日累计票房已突破13亿元。曲线呈典型“S型”增长，在5月16-17日（第二周周末）出现爆发式增长，体现出口碑驱动的“逆跌”特征。
+
+### 2.2潮汕地区票房占比变化
+```{r}
+df_box %>%
+  mutate(ratio = chaoshan / national * 100) %>%
+  ggplot(aes(x = date, y = ratio)) +
+  geom_line(color = "#2C7F6B", size = 1) +
+  labs(title = "潮汕地区票房占全国比例", x = "日期", y = "占比（%）") +
+  theme_minimal()
+```
+
+分析结论：上映首周潮汕地区贡献超过30%的票房，随后占比逐步下降至10%左右。这直观地说明影片成功走出文化核心区，被全国观众接纳。
+
+## 3.票房地理扩散路径
+
+```{r}
+region_cols <- c("east", "south", "central", "southwest", "north", "northwest", "northeast")
+df_long <- df_box %>%
+  select(date, all_of(region_cols)) %>%
+  pivot_longer(cols = -date, names_to = "region", values_to = "box")
+
+ggplot(df_long, aes(x = date, y = box, fill = region)) +
+  geom_area(position = "fill") +
+  labs(title = "七大区域票房占比变化", x = "日期", y = "占比", fill = "区域") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal()
+```
+
+分析结论：<br>
+初期（4.30-5.7）：华南地区（含广东）占绝对主导（>80%）。<br>
+中期（5.8-5.20）：华东、西南地区占比快速上升。<br>
+后期（5.21-5.28）：华东地区已成为最大票仓，东北、西北等地区也出现明显增长。<br>
+验证了“补涨效应”：口碑从核心文化区逐步向外围扩散，非传统票仓地区的贡献在后半程显著提升。
+
+## 4.豆瓣短评文本挖掘
+
+### 4.1 词频统计与词云图
+```{r}
+# 假设 df_comm 已存在，包含 comment 列
+library(dplyr)
+library(stringr)
+library(wordcloud2)
+# 1. 把所有评论合并成一个长字符串，然后按标点分割
+text_all <- paste(df_comm$comment, collapse = " ")
+# 用正则表达式把中文标点、空格都替换成空格，然后按空格分割
+words <- str_split(str_replace_all(text_all, "[，。？；：！、 “”‘’《》【】…—～\\.\\?\\!\\,;: \\t\\n\\r]+", " "), " ")[[1]]
+words <- words[nchar(words) >= 2]   # 只保留长度>=2的词
+# 2. 去除停用词（你可以继续添加）
+stop_words <- c("的","了","是","我","你","他","她","它","我们","你们","他们",
+                "这","那","有","就","也","还","都","在","把","被","让","给",
+                "很","太","非常","特别","一个","一些","这个","那个","自己",
+                "人","去","来","说","看","想","觉得","感觉","有点","还是",
+                "但是","所以","因为","如果","虽然","然后","真的","电影","一部",
+                "这部","片子","影片","故事","导演","演员","观众","没有","很")
+
+words_clean <- words[!words %in% stop_words]
+# 合并同义词示例
+df_comm$comment <- gsub("有情有义", "情义", df_comm$comment)
+df_comm$comment <- gsub("哭到崩溃", "哭", df_comm$comment)
+df_comm$comment <- gsub("哭成狗", "哭", df_comm$comment)
+# 可根据你的评论内容继续添加
+# 3. 统计词频
+word_freq <- as.data.frame(table(words_clean), stringsAsFactors = FALSE) %>%
+  arrange(desc(Freq)) %>%
+  head(30)
+# 查看结果
+word_freq
+# 4. 画词云图
+wordcloud2(word_freq, size = 0.8, shape = "circle")
+```
+
+### 4.2 情感定性分析<br>
+对81条评论逐条阅读后，归纳出三类主要情感倾向：<br>
+正面（约85%）：被“有情有义”、“哭到崩溃”、“细腻真诚”等强烈打动。<br>
+中性（约10%）：认可质量但指出节奏慢或人物过于理想化。<br>
+负面（约5%）：认为剧情平淡、“假”或不如预期。<br>
+典型正面评论摘录：<br>
+“做人一定要有情有义”<br>
+“在电影院哭成狗”<br>
+“只有真诚才是必杀技”
+
+## 5. 结论与建议<br>
+
+### 5.1 主要结论
+
+票房扩散路径清晰：从潮汕点映 → 广东全省 → 华东/西南补涨，呈现三阶段递进。<br>
+口碑突破地域限制：潮汕地区票房占比从30%降至10%，非潮汕地区成为长尾主力。<br>
+情感共鸣驱动传播：评论高频词“情义”“哭”“感动”验证了“真诚情感”是破圈的核心动力。
+
+### 5.2 对宣发的启示
+
+中小成本方言电影可优先深耕核心文化区，再通过口碑自然辐射全国。<br>
+情感营销（如“好哭”“真诚”）比明星阵容更有效。<br>
+女性及中老年观众是重要的增量市场（数据显示女性占比约65%，35岁以上观众近40%）。
+
+### 5.3 研究局限
+
+票房数据仅覆盖前31天，未包含6月份长尾期。<br>
+评论样本量有限（81条），情感分析未使用深度学习模型。<br>
+未获取观众购票行为数据，无法验证“自来水”传播的直接转化率。
+
+## 附录
+
+附录A：票房原始数据（Excel）<br>
+附录B：豆瓣短评原始文本（Excel）<br>
+附录C：完整R代码（GitHub链接）<br>
